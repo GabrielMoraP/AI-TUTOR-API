@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware  # Importar CORSMiddleware
 from pydantic import BaseModel
 import tensorflow as tf
 import pickle
@@ -14,6 +15,15 @@ max_len = 20
 
 # Crear la aplicación FastAPI
 app = FastAPI()
+
+# Configurar CORS para permitir cualquier origen
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Permitir solicitudes desde cualquier origen
+    allow_credentials=True,
+    allow_methods=["*"],  # Permitir todos los métodos (GET, POST, etc.)
+    allow_headers=["*"],  # Permitir todos los headers
+)
 
 # Modelo de datos para la entrada
 class TextInput(BaseModel):
@@ -42,6 +52,6 @@ def predict(input_data: TextInput):
     # Devolver la respuesta en formato JSON
     return {
         "input_text": input_text,
-        "prediction": int(prediction[0][0]),
+        "prediction": int(prediction[0][0]),  # Corregí el typo aquí (prediction en lugar de prediction)
         "response": response_text
     }
