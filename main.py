@@ -4,126 +4,103 @@ from pydantic import BaseModel
 import tensorflow as tf
 import pickle
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-import re  # Importar el módulo de expresiones regulares
+import re
 
-# Cargar el modelo y el tokenizer
+# Load the model and tokenizer
 model = tf.keras.models.load_model('model.keras')
 with open('tokenizer.pkl', 'rb') as handle:
     tokenizer = pickle.load(handle)
 
-# Definir la longitud máxima de las secuencias (debe ser la misma que se usó durante el entrenamiento)
+# Maximum sequence length
 max_len = 20
 
-# Crear la aplicación FastAPI
+# Create the FastAPI application
 app = FastAPI()
 
-# Configurar CORS para permitir cualquier origen
+# Configure CORS to allow all origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Permitir solicitudes desde cualquier origen
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Permitir todos los métodos (GET, POST, etc.)
-    allow_headers=["*"],  # Permitir todos los headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# Modelo de datos para la entrada
+# Data model for input
 class TextInput(BaseModel):
     text: str
 
-# Función para convertir de octal a decimal
-def octal_to_decimal(octal):
+# Function to convert octal to decimal with steps
+def octal_to_decimal_with_steps(octal):
     decimal = 0
     steps = []
+    results = []
     for i, digit in enumerate(reversed(octal)):
         step_value = int(digit) * (8 ** i)
-        step_explanation = (
-            f"Paso {i + 1}: Tomar el dígito {digit} en la posición {i} (de derecha a izquierda), "
-            f"multiplicarlo por 8^{i} (que es {8 ** i}) y sumarlo al resultado acumulado. "
-            f"{digit} * 8^{i} = {step_value}"
-        )
-        steps.append(step_explanation)
+        step_explanation = f"Multiplica {digit} por 8^{i}:"
+        step_operation = f"{digit} * 8^{i} = {step_value}"
+        steps.append({"Explicación": step_explanation, "Operación": step_operation})
         decimal += step_value
+        results.append(step_value)
+
+    sum_explanation = "Suma todos los resultados:"
+    sum_operation = " + ".join(map(str, results)) + f" = {decimal}"
+    steps.append({"Explicación": sum_explanation, "Operación": sum_operation})
     return decimal, steps
 
-# Función para convertir de decimal a octal
-def decimal_to_octal(decimal):
+# Function to convert decimal to octal with steps
+def decimal_to_octal_with_steps(decimal):
     octal = ""
     steps = []
-    step_count = 1
+    remainders = []
     while decimal > 0:
         remainder = decimal % 8
-        step_explanation = (
-            f"Paso {step_count}: Dividir {decimal} entre 8. "
-            f"El cociente es {decimal // 8} y el residuo es {remainder}. "
-            f"El residuo {remainder} es el siguiente dígito octal (de derecha a izquierda)."
-        )
-        steps.append(step_explanation)
+        step_explanation = f"Divide {decimal} entre 8:"
+        step_operation = f"{decimal} / 8 = {decimal // 8} <- Próximo Dividendo | Residuo = {remainder}"
+        steps.append({"Explicación": step_explanation, "Operación": step_operation})
         octal = str(remainder) + octal
         decimal = decimal // 8
-        step_count += 1
+        remainders.append(str(remainder))
+
+    join_explanation = "Junta los digitos del residuo en orden inverso:"
+    join_operation = "".join(reversed(remainders))
+    steps.append({"Explicación": join_explanation, "Operación": join_operation})
     return octal, steps
 
-# Función para extraer el número y el tipo de conversión
+# Function to extract the number and make the prediction
 def parse_input(input_text):
-    # Buscar un número en la cadena de texto
     number_match = re.search(r'\d+', input_text)
     if not number_match:
-        raise ValueError("No se encontró un número en la entrada.")
+        raise ValueError("Proporciona un valor númerico, por favor.")
 
     number = number_match.group()
+    input_sequence = tokenizer.texts_to_sequences([input_text])
+    input_padded = pad_sequences(input_sequence, maxlen=max_len, padding='post')
+    prediction = model.predict(input_padded)[0][0]
+    return number, prediction
 
-    # Determinar el tipo de conversión
-    if "decimal a octal" in input_text.lower():
-        conversion_type = "decimal_to_octal"
-    elif "octal a decimal" in input_text.lower():
-        conversion_type = "octal_to_decimal"
-    else:
-        # Si no se especifica, usar la predicción del modelo
-        input_sequence = tokenizer.texts_to_sequences([input_text])
-        input_padded = pad_sequences(input_sequence, maxlen=max_len, padding='post')
-        prediction = model.predict(input_padded)[0][0]  # Obtener el valor real de la predicción
-        conversion_type = "octal_to_decimal" if prediction > 0.5 else "decimal_to_octal"
-
-    return number, conversion_type, float(prediction) if "prediction" in locals() else None
-
-# Ruta para la predicción
+# Prediction route
 @app.post('/predict')
 def predict(input_data: TextInput):
-    # Obtener el texto de entrada
     input_text = input_data.text
 
     try:
-        # Extraer el número, el tipo de conversión y la predicción (si aplica)
-        number, conversion_type, prediction = parse_input(input_text)
+        number, prediction = parse_input(input_text)
 
-        # Realizar la conversión correspondiente
-        if conversion_type == "octal_to_decimal":
-            decimal, steps = octal_to_decimal(number)
-            response = {
-                "tipo_conversion": "Conversión Octal a Decimal",
-                "pasos": steps,
-                "resultado": decimal,
-                "prediccion": prediction if prediction is not None else None
-            }
-        elif conversion_type == "decimal_to_octal":
-            octal, steps = decimal_to_octal(int(number))
-            response = {
-                "tipo_conversion": "Conversión Decimal a Octal",
-                "pasos": steps,
-                "resultado": octal,
-                "prediccion": prediction if prediction is not None else None
-            }
+        if prediction > 0.5:
+            result, steps = octal_to_decimal_with_steps(number)
+            conversion_type = "Octal a Decimal"
         else:
-            response = {
-                "error": "Tipo de conversión no válido."
-            }
-    except ValueError as e:
-        response = {
-            "error": str(e)
+            result, steps = decimal_to_octal_with_steps(int(number))
+            conversion_type = "Decimal a Octal"
+
+        return {
+            "input_number": number,
+            "conversion_type": conversion_type,
+            "result": result,
+            "steps": steps,
+            "prediction": float(prediction)
         }
 
-    # Devolver la respuesta en formato JSON
-    return {
-        "input_text": input_text,
-        "response": response
-    }
+    except:
+        raise HTTPException(status_code=500, detail="Intentelo Nuevamente.")
