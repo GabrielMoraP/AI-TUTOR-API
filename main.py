@@ -32,6 +32,9 @@ class TextInput(BaseModel):
 
 # Function to convert octal to decimal with steps
 def octal_to_decimal_with_steps(octal):
+    if not re.match(r'^[0-7]+$', octal):
+        raise ValueError("El número octal debe contener solo dígitos del 0 al 7.")
+
     decimal = 0
     steps = []
     results = []
